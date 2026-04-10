@@ -274,7 +274,7 @@ When PASTE-P, “bracketed paste” mode will be used. When RET-P, terminate wit
 
   (cl-defstruct julia-repl--buffer-ghostel
     "Terminal backend using ‘ghostel’, which needs to be installed and loaded.")
-  
+
   (defun ghostel-process-live-p ()
     "Return non-nil if the current ghostel buffer has a live shell process."
     (and ghostel--process (process-live-p ghostel--process)))
@@ -297,26 +297,39 @@ When PASTE-P, “bracketed paste” mode will be used. When RET-P, terminate wit
 	  (if (file-exists-p mod)
 	      (module-load mod)
 	    (user-error "Ghostel native module not available")))))
-    (let ((ghostel-buffer (get-buffer-create (julia-repl--add-earmuffs name)))
-	  (inhibit-read-only t))
+    ;; ghostel-shell must be a plain executable path — ghostel passes it through
+    ;; shell-quote-argument and quotes the whole string, so spaces in the name
+    ;; would make exec fail.  When switches are present, write a wrapper script.
+    (let* ((wrapper (when switches
+		      (let ((f (make-temp-file "julia-repl-" nil ".sh")))
+			(with-temp-file f
+			  (insert "#!/bin/sh\nexec "
+				  (shell-quote-argument executable-path)
+				  " "
+				  (mapconcat #'shell-quote-argument switches " ")
+				  "\n"))
+			(set-file-modes f #o755)
+			f)))
+	   (ghostel-shell (or wrapper executable-path))
+	   (ghostel-buffer (get-buffer-create (julia-repl--add-earmuffs name))))
       (with-current-buffer ghostel-buffer
-	(let ((ghostel-shell (s-join " " (cons executable-path switches))))
-	  (ghostel-mode)
-	  (setq ghostel--managed-buffer-name (buffer-name))
-	  (local-set-key (kbd "C-c C-z") #'julia-repl--switch-back)
-	  ;; Initialize the terminal and start the process.  We use
-	  ;; display-buffer to ensure the buffer is in a window so that
-	  ;; window-body-height / window-max-chars-per-line return real
-	  ;; dimensions, then immediately bury it — julia-repl will
-	  ;; pop-to-buffer it afterwards.
-	  (let ((win (display-buffer ghostel-buffer '(display-buffer-same-window))))
-	    (with-selected-window win
-	      (let* ((height (window-body-height))
-		     (width (window-max-chars-per-line)))
-		(setq ghostel--term
-		      (ghostel--new height width ghostel-max-scrollback))
-		(ghostel--apply-palette ghostel--term))))
-	  (ghostel--start-process)))
+	(ghostel-mode)
+	(setq ghostel--managed-buffer-name (buffer-name))
+	(local-set-key (kbd "C-c C-z") #'julia-repl--switch-back)
+	(add-hook 'compilation-shell-minor-mode-hook
+		  (lambda () (setq next-error-function 'julia-repl--next-error-function))
+		  t t)
+	;; Use initial dimensions of 80x24; the terminal resizes to the real
+	;; window size via SIGWINCH once the buffer is displayed.
+	(setq ghostel--term
+	      (ghostel--new 24 80 ghostel-max-scrollback))
+	(ghostel--apply-palette ghostel--term)
+	(ghostel--start-process)
+	;; Delete the wrapper script (if any) once the process exits.
+	(when wrapper
+	  (add-function :after (process-sentinel ghostel--process)
+			(lambda (_proc _event)
+			  (ignore-errors (delete-file wrapper))))))
       ghostel-buffer))
 
   (cl-defmethod julia-repl--send-to-backend ((_terminal-backend julia-repl--buffer-ghostel)
