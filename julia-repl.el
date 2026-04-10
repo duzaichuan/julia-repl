@@ -268,6 +268,44 @@ When PASTE-P, “bracketed paste” mode will be used. When RET-P, terminate wit
       (when ret-p
 	(eat-term-send-string eat-terminal "\^M")))))
 
+;;; ghostel term
+
+(with-eval-after-load 'ghostel
+
+  (cl-defstruct julia-repl--buffer-ghostel
+    "Terminal backend using ‘ghostel’, which needs to be installed and loaded.")
+  
+  (defun ghostel-process-live-p ()
+    "Return non-nil if the current ghostel buffer has a live shell process."
+    (and ghostel--process (process-live-p ghostel--process)))
+
+  (cl-defmethod julia-repl--locate-live-buffer ((_terminal-backend julia-repl--buffer-ghostel)
+						name)
+    (if-let ((inferior-buffer (get-buffer (julia-repl--add-earmuffs name))))
+	(with-current-buffer inferior-buffer
+	  (cl-assert (eq major-mode 'ghostel-mode) nil "Expected ghostel-mode. Changed mode or backends?")
+	  (when (ghostel-process-live-p inferior-buffer)
+	    inferior-buffer))))
+
+  (cl-defmethod julia-repl--make-buffer ((_terminal-backend julia-repl--buffer-ghostel)
+					 name executable-path switches)
+    (let ((ghostel-buffer (get-buffer-create (julia-repl--add-earmuffs name)))
+	  (inhibit-read-only t))
+      (with-current-buffer ghostel-buffer
+	(let ((ghostel-shell (s-join " " (cons executable-path switches))))
+	  (ghostel-mode)
+	  (local-set-key (kbd "C-c C-z") #'julia-repl--switch-back)))
+      ghostel-buffer))
+
+  (cl-defmethod julia-repl--send-to-backend ((_terminal-backend julia-repl--buffer-ghostel)
+					     buffer string paste-p ret-p)
+    (with-current-buffer buffer
+      (if paste-p
+	  (ghostel--paste-text string)
+	(ghostel--send-key string))
+      (when ret-p
+	(ghostel--send-key "\^M")))))
+
 ;;; compiler output regexps for navigation
 
 (defconst julia-repl--CR-path
@@ -342,6 +380,9 @@ Valid backends are currently:
     (eat
      (require 'eat)
      (setq julia-repl--terminal-backend (make-julia-repl--buffer-eat)))
+    (ghostel
+     (require 'ghostel)
+     (setq julia-repl--terminal-backend (make-julia-repl--buffer-ghostel)))
     (otherwise
      (error "Unrecognized backend “%s”." backend))))
 
