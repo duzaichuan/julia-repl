@@ -284,21 +284,39 @@ When PASTE-P, “bracketed paste” mode will be used. When RET-P, terminate wit
     (if-let ((inferior-buffer (get-buffer (julia-repl--add-earmuffs name))))
 	(with-current-buffer inferior-buffer
 	  (cl-assert (eq major-mode 'ghostel-mode) nil "Expected ghostel-mode. Changed mode or backends?")
-	  (when (ghostel-process-live-p inferior-buffer)
+	  (when (ghostel-process-live-p)
 	    inferior-buffer))))
 
   (cl-defmethod julia-repl--make-buffer ((_terminal-backend julia-repl--buffer-ghostel)
 					 name executable-path switches)
+    ;; Ensure the native module is loaded (ghostel--new is a native function).
+    (unless (fboundp 'ghostel--new)
+      (let ((dir (file-name-directory (locate-library "ghostel"))))
+	(ghostel--ensure-module dir)
+	(let ((mod (expand-file-name (concat "ghostel-module" module-file-suffix) dir)))
+	  (if (file-exists-p mod)
+	      (module-load mod)
+	    (user-error "Ghostel native module not available")))))
     (let ((ghostel-buffer (get-buffer-create (julia-repl--add-earmuffs name)))
 	  (inhibit-read-only t))
       (with-current-buffer ghostel-buffer
 	(let ((ghostel-shell (s-join " " (cons executable-path switches))))
 	  (ghostel-mode)
+	  (setq ghostel--managed-buffer-name (buffer-name))
 	  (local-set-key (kbd "C-c C-z") #'julia-repl--switch-back)
-	  (add-hook 'compilation-shell-minor-mode-hook
-		    ;; NOTE run *after* vterm's hook and overwrite `next-error-function'
-		    (lambda () (setq next-error-function 'julia-repl--next-error-function))
-		    t t)))
+	  ;; Initialize the terminal and start the process.  We use
+	  ;; display-buffer to ensure the buffer is in a window so that
+	  ;; window-body-height / window-max-chars-per-line return real
+	  ;; dimensions, then immediately bury it — julia-repl will
+	  ;; pop-to-buffer it afterwards.
+	  (let ((win (display-buffer ghostel-buffer '(display-buffer-same-window))))
+	    (with-selected-window win
+	      (let* ((height (window-body-height))
+		     (width (window-max-chars-per-line)))
+		(setq ghostel--term
+		      (ghostel--new height width ghostel-max-scrollback))
+		(ghostel--apply-palette ghostel--term))))
+	  (ghostel--start-process)))
       ghostel-buffer))
 
   (cl-defmethod julia-repl--send-to-backend ((_terminal-backend julia-repl--buffer-ghostel)
