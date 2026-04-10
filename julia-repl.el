@@ -294,7 +294,11 @@ When PASTE-P, “bracketed paste” mode will be used. When RET-P, terminate wit
       (with-current-buffer ghostel-buffer
 	(let ((ghostel-shell (s-join " " (cons executable-path switches))))
 	  (ghostel-mode)
-	  (local-set-key (kbd "C-c C-z") #'julia-repl--switch-back)))
+	  (local-set-key (kbd "C-c C-z") #'julia-repl--switch-back)
+	  (add-hook 'compilation-shell-minor-mode-hook
+		    ;; NOTE run *after* vterm's hook and overwrite `next-error-function'
+		    (lambda () (setq next-error-function 'julia-repl--next-error-function))
+		    t t)))
       ghostel-buffer))
 
   (cl-defmethod julia-repl--send-to-backend ((_terminal-backend julia-repl--buffer-ghostel)
