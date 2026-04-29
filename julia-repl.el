@@ -321,8 +321,10 @@ When PASTE-P, “bracketed paste” mode will be used. When RET-P, terminate wit
 		  t t)
 	;; Use initial dimensions of 80x24; the terminal resizes to the real
 	;; window size via SIGWINCH once the buffer is displayed.
-	(setq ghostel--term
-	      (ghostel--new 24 80 ghostel-max-scrollback))
+       	(setq ghostel--term-rows 24
+	      ghostel--term-cols 80
+	      ghostel--term
+	      (ghostel--new ghostel--term-rows ghostel--term-cols ghostel-max-scrollback))
 	(ghostel--apply-palette ghostel--term)
 	(ghostel--start-process)
 	;; Delete the wrapper script (if any) once the process exits.
@@ -337,9 +339,9 @@ When PASTE-P, “bracketed paste” mode will be used. When RET-P, terminate wit
     (with-current-buffer buffer
       (if paste-p
 	  (ghostel--paste-text string)
-	(ghostel--send-key string))
+	(ghostel--send-string string))
       (when ret-p
-	(ghostel--send-key "\^M")))))
+	(ghostel--send-string "\^M")))))
 
 ;;; compiler output regexps for navigation
 
